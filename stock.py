@@ -1,6 +1,88 @@
 import decimal
+from enum import Enum
+from dataclasses import dataclass
+from typing import Optional
 
 MONEY_STEP = decimal.Decimal('0.01')
+
+
+class Side(str, Enum):
+    BUY = 'BUY'
+    SELL = 'SELL'
+
+
+class OrderType(str, Enum):
+    LIMIT = 'LMT'
+    MARKET = 'MKT'
+
+
+class OrderStatus(str, Enum):
+    PENDING = 'PENDING'
+    PARTIAL = 'PARTIAL'
+    FILLED = 'FILLED'
+
+
+@dataclass
+class Order:
+    id: int
+    symbol: str
+    side: Side
+    order_type: OrderType
+    price: Optional[decimal.Decimal]
+    qty: int
+    filled: int = 0
+
+    @property
+    def status(self) -> OrderStatus:
+        if self.filled == 0:
+            return OrderStatus.PENDING
+        elif 0 < self.filled < self.qty:
+            return OrderStatus.PARTIAL
+        elif self.filled == self.qty:
+            return OrderStatus.FILLED
+
+
+class OrderBook():
+    def __init__(self, symbol: str):
+        self.symbol = symbol
+        self.last_price: Optional[decimal.Decimal] = None
+        self.bids: list[Order] = []
+        self.asks: list[Order] = []
+
+    def add(self, order: Order):
+        if order.side == Side.BUY:
+            self.bids.append(order)
+            self.bids.sort(key=lambda o: decimal.Decimal(
+                'Infinity') if o.price is None else o.price, reverse=True)
+        elif order.side == Side.SELL:
+            self.asks.append(order)
+            self.asks.sort(key=lambda o: 0 if o.price is None else o.price)
+
+    def match(self):
+        while True:
+            if not self.bids or not self.asks:
+                return
+
+            best_buy = self.bids[0]
+            best_sell = self.asks[0]
+
+            if best_buy.price is not None and best_sell.price is not None:
+                if best_buy.price < best_sell.price:
+                    return
+
+            buy_remaining = best_buy.qty - best_buy.filled
+            sell_remaining = best_sell.qty - best_sell.filled
+            trade_qty = min(buy_remaining, sell_remaining)
+            best_buy.filled += trade_qty
+            best_sell.filled += trade_qty
+
+            if best_buy.filled == best_buy.qty:
+                self.bids.pop(0)
+            if best_sell.filled == best_sell.qty:
+                self.asks.pop(0)
+
+            trade_price = best_sell.price if best_sell.price is not None else best_buy.price
+            self.last_price = trade_price
 
 
 class Exchange():
@@ -14,8 +96,7 @@ class Exchange():
         order_side = cmd['side']
         order_symbol = cmd['symbol']
         order_type = cmd['type']
-        order_status = 'PENDING'
-        if order_type == 'LMT':
+        if order_type == OrderType.LIMIT:
             order_price = cmd['price']
             order_qty = cmd['qty']
         else:
@@ -25,155 +106,53 @@ class Exchange():
         order_id = self.next_id
         self.next_id += 1
 
-        order = {'id': order_id, 'symbol': order_symbol, 'side': order_side,
-                 'type': order_type, 'price': order_price, 'qty': order_qty,
-                 'filled': 0, 'status': order_status}
+        order = Order(order_id, order_symbol, order_side,
+                      order_type, order_price, order_qty, 0)
 
         self.orders_all.append(order)
-
         if order_symbol not in self.books:
-            self.books[order_symbol] = {'buy': [], 'sell': []}
-        side_key = 'buy' if order_side == 'BUY' else 'sell'
-        self.books[order_symbol][side_key].append(order)
-
-        self.match(order['symbol'])
+            self.books[order_symbol] = OrderBook(order_symbol)
+        self.books[order_symbol].add(order)
+        self.books[order_symbol].match()
 
         return order
 
     def view_orders(self):
         for order in self.orders_all:
-            if order['type'] == 'MKT':
-                return (
-                    f"{order['id']} {order['symbol']} {order['type']} {order['side']} N/A {order['filled']}/{order['qty']} {order['status']}")
+            if order.order_type == OrderType.MARKET:
+                print(
+                    f"{order.id}. {order.symbol} {order.order_type} {order.side} N/A {order.filled}/{order.qty} {order.status.value}")
             else:
-                return (
-                    f"{order['id']} {order['symbol']} {order['type']} {order['side']} ${order['price']:.2f} {order['filled']}/{order['qty']} {order['status']}")
+                print(
+                    f"{order.id}. {order.symbol} {order.order_type} {order.side} ${order.price:.2f} {order.filled}/{order.qty} {order.status.value}")
 
     def quote(self, symbol):
+        def isnoneprice(price: Optional[decimal.Decimal]):
+            if price is None:
+                return 'N/A'
+            else:
+                return f'${price:.2f}'
+
         if symbol not in self.books:
-            bid = None
-            ask = None
-            last = self.last_price.get(symbol)
+            return f'{symbol} BID: N/A ASK: N/A LAST: N/A'
         else:
-            buy_cand = []
-            sell_cand = []
+            book = self.books[symbol]
 
-            for i in self.books[symbol]['buy']:
-                if i['type'] == 'LMT' and i['filled'] < i['qty']:
-                    buy_cand.append(i)
-            for i in self.books[symbol]['sell']:
-                if i['type'] == 'LMT' and i['filled'] < i['qty']:
-                    sell_cand.append(i)
+        bid = None
+        ask = None
+        for order in book.bids:
+            if order.price is not None:
+                bid = order.price
+                break
 
-            if buy_cand:
-                best_buy = max(buy_cand, key=lambda o: o['price'])
-                bid = best_buy['price']
-            else:
-                bid = None
+        for order in book.asks:
+            if order.price is not None:
+                ask = order.price
+                break
 
-            if sell_cand:
-                best_sell = min(sell_cand, key=lambda o: o['price'])
-                ask = best_sell['price']
-            else:
-                ask = None
-            last = self.last_price.get(symbol)
+        last = book.last_price
 
-        if bid is None:
-            bid_print = 'N/A'
-        else:
-            bid_print = f"${bid:.2f}"
-
-        if ask is None:
-            ask_print = 'N/A'
-        else:
-            ask_print = f"${ask:.2f}"
-
-        if last is None:
-            last_print = 'N/A'
-        else:
-            last_print = f"${last:.2f}"
-
-        return f'{symbol} BID: {bid_print} ASK: {ask_print} LAST: {last_print}'
-
-    def best_buy_order(self, symbol):
-        actives = []
-        lmt_actives = []
-        if symbol in self.books:
-            for order in self.books[symbol]['buy']:
-                if order['filled'] < order['qty']:
-                    actives.append(order)
-
-            for order in actives:
-                if order['type'] == 'LMT':
-                    lmt_actives.append(order)
-
-            if lmt_actives:
-                best_lmt = max(lmt_actives, key=lambda o: (
-                    o['price'], -o['id']))
-            else:
-                best_lmt = None
-        else:
-            best_lmt = None
-        return best_lmt
-
-    def best_sell_order(self, symbol):
-        actives = []
-        lmt_actives = []
-        if symbol in self.books:
-            for order in self.books[symbol]['sell']:
-                if order['filled'] < order['qty']:
-                    actives.append(order)
-
-            for order in actives:
-                if order['type'] == 'LMT':
-                    lmt_actives.append(order)
-
-            if lmt_actives:
-                best_lmt = min(
-                    lmt_actives, key=lambda o: (o['price'], o['id']))
-            else:
-                best_lmt = None
-        else:
-            best_lmt = None
-        return best_lmt
-
-    def match(self, symbol):
-        while True:
-            buy = self.best_buy_order(symbol)
-            sell = self.best_sell_order(symbol)
-
-            if buy is None or sell is None:
-                return
-
-            if buy['price'] < sell['price']:
-                return
-
-            trade_qty = min(buy['qty'] - buy['filled'],
-                            sell['qty'] - sell['filled'])
-
-            if trade_qty == 0:
-                return
-
-            buy['filled'] += trade_qty
-            sell['filled'] += trade_qty
-
-            if buy['filled'] == 0:
-                buy['status'] = 'PENDING'
-            elif 0 < buy['filled'] < buy['qty']:
-                buy['status'] = 'PARTIAL'
-            elif buy['filled'] == buy['qty']:
-                buy['status'] = 'FILLED'
-                self.books[symbol]['buy'].remove(buy)
-
-            if sell['filled'] == 0:
-                sell['status'] = 'PENDING'
-            elif 0 < sell['filled'] < sell['qty']:
-                sell['status'] = 'PARTIAL'
-            elif sell['filled'] == sell['qty']:
-                sell['status'] = 'FILLED'
-                self.books[symbol]['sell'].remove(sell)
-
-            self.last_price[symbol] = sell['price']
+        return f'{symbol} BID: {isnoneprice(bid)} ASK: {isnoneprice(ask)} LAST: {isnoneprice(last)}'
 
 
 def parse_money(token: str):
@@ -193,8 +172,8 @@ def parse_action(line: str):
         return {'cmd': 'QUOTE', 'symbol': parts[1]}
     elif parts[0] == 'QUIT':
         return {'cmd': 'QUIT'}
-    elif parts[0] in ('BUY', 'SELL'):
-        if parts[2] == 'MKT':
+    elif parts[0] in (Side.BUY, Side.SELL):
+        if parts[2] == OrderType.MARKET:
             price = None
             qty = int(parts[3])
         else:
@@ -212,10 +191,14 @@ def main():
         cmd = parse_action(line)
 
         if cmd['cmd'] == 'VIEW_ORDERS':
-            print(ex.view_orders())
+            ex.view_orders()
         elif cmd['cmd'] == 'QUOTE':
             print(ex.quote(cmd['symbol']))
         elif cmd['cmd'] == 'PLACE':
             ex.place_order(cmd)
         elif cmd['cmd'] == 'QUIT':
             break
+
+
+if __name__ == '__main__':
+    main()
