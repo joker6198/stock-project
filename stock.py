@@ -121,10 +121,10 @@ class Exchange():
         for order in self.orders_all:
             if order.order_type == OrderType.MARKET:
                 print(
-                    f"{order.id}. {order.symbol} {order.order_type} {order.side} N/A {order.filled}/{order.qty} {order.status.value}")
+                    f"{order.id}. {order.symbol} {order.order_type.value} {order.side.value} N/A {order.filled}/{order.qty} {order.status.value}")
             else:
                 print(
-                    f"{order.id}. {order.symbol} {order.order_type} {order.side} ${order.price:.2f} {order.filled}/{order.qty} {order.status.value}")
+                    f"{order.id}. {order.symbol} {order.order_type.value} {order.side.value} ${order.price:.2f} {order.filled}/{order.qty} {order.status.value}")
 
     def quote(self, symbol):
         def isnoneprice(price: Optional[decimal.Decimal]):
