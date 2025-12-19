@@ -1,48 +1,5 @@
 import decimal
-from enum import Enum
-from dataclasses import dataclass
-from typing import Optional
-
-MONEY_STEP = decimal.Decimal('0.01')
-
-
-class Side(str, Enum):
-    BUY = 'BUY'
-    SELL = 'SELL'
-
-
-class OrderType(str, Enum):
-    LIMIT = 'LMT'
-    MARKET = 'MKT'
-
-
-class OrderStatus(str, Enum):
-    PENDING = 'PENDING'
-    PARTIAL = 'PARTIAL'
-    FILLED = 'FILLED'
-
-
-@dataclass
-class Order:
-    id: int
-    symbol: str
-    side: Side
-    order_type: OrderType
-    price: Optional[decimal.Decimal]
-    qty: int
-    filled: int = 0
-
-    @property
-    def status(self) -> OrderStatus:
-        if self.filled == 0:
-            return OrderStatus.PENDING
-        elif 0 < self.filled < self.qty:
-            return OrderStatus.PARTIAL
-        elif self.filled == self.qty:
-            return OrderStatus.FILLED
-        else:
-            raise ValueError(
-                f'Некорректное значение filled: {self.filled} (qty: {self.qty})')
+from models import Side, Order, Optional, OrderType
 
 
 class OrderBook():
@@ -96,9 +53,9 @@ class Exchange():
         self.next_id = 1
 
     def place_order(self, cmd):
-        order_side = cmd['side']
+        order_side = Side(cmd['side'])
         order_symbol = cmd['symbol']
-        order_type = cmd['type']
+        order_type = OrderType(cmd['type'])
         if order_type == OrderType.LIMIT:
             order_price = cmd['price']
             order_qty = cmd['qty']
@@ -156,79 +113,3 @@ class Exchange():
         last = book.last_price
 
         return f'{symbol} BID: {isnoneprice(bid)} ASK: {isnoneprice(ask)} LAST: {isnoneprice(last)}'
-
-
-def parse_money(token: str):
-    s = token.strip()
-    if s.startswith('$'):
-        s = s[1:]
-
-    value = decimal.Decimal(s)
-    return value.quantize(MONEY_STEP, rounding=decimal.ROUND_HALF_UP)
-
-
-def parse_action(line: str):
-    parts = line.split()
-    if not parts:
-        return None
-
-    if len(parts) >= 2 and parts[0] == 'VIEW' and parts[1] == 'ORDERS':
-        return {'cmd': 'VIEW_ORDERS'}
-    elif parts[0] == 'QUOTE':
-        if len(parts) != 2:
-            raise ValueError('Формат команды: QUOTE <SYMBOL>')
-        return {'cmd': 'QUOTE', 'symbol': parts[1]}
-    elif parts[0] == 'QUIT':
-        return {'cmd': 'QUIT'}
-    elif parts[0] in (Side.BUY, Side.SELL):
-        if len(parts) < 3:
-            raise ValueError(
-                f'Неполная команла {parts[0]}.Ожидается: {parts[0]} <SYMBOL> <TYPE> ...')
-        if parts[2] == OrderType.MARKET:
-            if len(parts) < 4:
-                raise ValueError('Для MARKET ордера нужно указать количество.')
-            price = None
-            qty = int(parts[3])
-        elif parts[2] == OrderType.LIMIT:
-            if len(parts) < 5:
-                raise ValueError('Для LIMIT ордера нужны цена и количество.')
-            price = parse_money(parts[3])
-            qty = int(parts[4])
-        else:
-            raise ValueError(f'Неизвестный тип ордера: {parts[2]}')
-        return {'cmd': 'PLACE', 'side': parts[0], 'symbol': parts[1],
-                'type': parts[2], 'price': price, 'qty': qty}
-    else:
-        raise ValueError(f"Неизвестная команда: {parts[0]}")
-
-
-def main():
-    ex = Exchange()
-
-    while True:
-        try:
-            line = input()
-            cmd = parse_action(line)
-
-            if cmd is None:
-                continue
-
-            if cmd['cmd'] == 'VIEW_ORDERS':
-                ex.view_orders()
-            elif cmd['cmd'] == 'QUOTE':
-                print(ex.quote(cmd['symbol']))
-            elif cmd['cmd'] == 'PLACE':
-                ex.place_order(cmd)
-            elif cmd['cmd'] == 'QUIT':
-                break
-        except (EOFError, KeyboardInterrupt):
-            print('\nВыход из программы.')
-            break
-        except ValueError as e:
-            print(f'Ошибка ввода: {e}')
-        except Exception as e:
-            print(f'Произошла ошибка: {e}')
-
-
-if __name__ == '__main__':
-    main()
