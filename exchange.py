@@ -1,11 +1,12 @@
 import decimal
-from models import Side, Order, Optional, OrderType
+from typing import Optional
+
+from models import Side, Order, OrderType
 
 
 class OrderBook():
     def __init__(self, symbol: str):
         self.symbol = symbol
-        self.last_price: Optional[decimal.Decimal] = None
         self.bids: list[Order] = []
         self.asks: list[Order] = []
 
@@ -41,15 +42,11 @@ class OrderBook():
             if best_sell.filled == best_sell.qty:
                 self.asks.pop(0)
 
-            trade_price = best_sell.price if best_sell.price is not None else best_buy.price
-            self.last_price = trade_price
-
 
 class Exchange():
     def __init__(self):
         self.orders_all = []
         self.books = {}
-        self.last_price = {}
         self.next_id = 1
 
     def place_order(self, cmd):
@@ -57,11 +54,20 @@ class Exchange():
         order_symbol = cmd['symbol']
         order_type = OrderType(cmd['type'])
         if order_type == OrderType.LIMIT:
-            order_price = cmd['price']
+            order_price = cmd.get('price')
+            if order_price is None:
+                raise ValueError('Для LIMIT ордера нужна цена.')
+            elif order_price <= 0:
+                raise ValueError('Для LIMIT цена должна быть больше 0')
             order_qty = cmd['qty']
         else:
+            if cmd.get('price') is not None:
+                raise ValueError('Для MARKET ордера цена не указывается.')
             order_price = None
             order_qty = cmd['qty']
+
+        if order_qty <= 0:
+            raise ValueError('Количество (qty) должно быть больше 0')
 
         order_id = self.next_id
         self.next_id += 1
@@ -72,8 +78,13 @@ class Exchange():
         self.orders_all.append(order)
         if order_symbol not in self.books:
             self.books[order_symbol] = OrderBook(order_symbol)
-        self.books[order_symbol].add(order)
-        self.books[order_symbol].match()
+        book = self.books[order_symbol]
+        book.add(order)
+        book.match()
+        if order.order_type == OrderType.MARKET and order.filled < order.qty:
+            book_list = book.bids if order.side == Side.BUY else book.asks
+            if order in book_list:
+                book_list.remove(order)
 
         return order
 
@@ -94,7 +105,7 @@ class Exchange():
                 return f'${price:.2f}'
 
         if symbol not in self.books:
-            return f'{symbol} BID: N/A ASK: N/A LAST: N/A'
+            return f'{symbol} BID: N/A ASK: N/A'
         else:
             book = self.books[symbol]
 
@@ -110,6 +121,4 @@ class Exchange():
                 ask = order.price
                 break
 
-        last = book.last_price
-
-        return f'{symbol} BID: {isnoneprice(bid)} ASK: {isnoneprice(ask)} LAST: {isnoneprice(last)}'
+        return f'{symbol} BID: {isnoneprice(bid)} ASK: {isnoneprice(ask)}'

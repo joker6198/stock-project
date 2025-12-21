@@ -22,19 +22,19 @@ A command-line based stock exchange engine implemented in Python. It supports Li
 2.  Navigate to the project directory.
 3.  Run the application using the following command:
 
-        python stock.py
+        python main.py
 
 ### Sample Usage
 
 Once the program is running, you can enter commands:
 
 
-    Action: BUY SNAP LMT $30 100
-    Action: BUY FB MKT 20
-    Action: VIEW ORDERS
-    Action: SELL SNAP LMT $30.00 20
-    Action: QUOTE SNAP
-    Action: QUIT
+    BUY SNAP LMT $30 100
+    BUY FB MKT 20
+    VIEW ORDERS
+    SELL SNAP LMT $30.00 20
+    QUOTE SNAP
+    QUIT
 
 
 ## How to Run Tests
